@@ -51,7 +51,7 @@ jobs:
       run: |
         mkdir -p anim data music maps
         if [[ "${{ inputs.demo }}" == "true" ]]; then
-          if ./script/demo/download_demo_version.sh "$PWD"; then
+          if bash ./script/demo/download_demo_version.sh "$PWD"; then
             rm -rf demo
           else
             echo "::warning::The demo data could not be downloaded. The app is built without game data."
