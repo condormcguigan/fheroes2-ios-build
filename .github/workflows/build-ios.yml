@@ -1,0 +1,95 @@
+name: Build fheroes2 for iPhone
+
+# Builds an unsigned fheroes2.ipa from the official fheroes2 source code.
+# Run it from the "Actions" tab with the "Run workflow" button, then download
+# the "fheroes2-ios" file from the finished run and install it with Sideloadly.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: fheroes2 branch or tag to build
+        default: master
+        required: true
+      configuration:
+        description: Build type (Release is faster in game)
+        type: choice
+        default: Release
+        options:
+        - Release
+        - Debug
+      demo:
+        description: Include the free demo data so the app runs right away
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    name: iPhone build
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+    - name: Get the fheroes2 source code
+      uses: actions/checkout@v7
+      with:
+        repository: ihhub/fheroes2
+        ref: ${{ inputs.ref }}
+
+    - name: Show Xcode version
+      run: /usr/bin/xcodebuild -version
+
+    - name: Make sure the Metal toolchain is present
+      run: xcodebuild -downloadComponent MetalToolchain || true
+
+    - name: Install SDL2 and SDL2_mixer sources
+      run: ./script/ios/install_packages.sh
+
+    - name: Prepare game data folders
+      run: |
+        mkdir -p anim data music maps
+        if [[ "${{ inputs.demo }}" == "true" ]]; then
+          if ./script/demo/download_demo_version.sh "$PWD"; then
+            rm -rf demo
+          else
+            echo "::warning::The demo data could not be downloaded. The app is built without game data."
+          fi
+        fi
+        echo "data: $(ls data | wc -l) files, maps: $(ls maps | wc -l) files"
+
+    - name: Build for iPhone (unsigned)
+      run: |
+        cd ios
+        xcodebuild -project fheroes2.xcodeproj \
+          -scheme fheroes2 \
+          -configuration "${{ inputs.configuration }}" \
+          -destination 'generic/platform=iOS' \
+          -derivedDataPath "$RUNNER_TEMP/derived" \
+          -quiet \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY="" \
+          build
+
+    - name: Package fheroes2.ipa
+      run: |
+        APP="$(find "$RUNNER_TEMP/derived/Build/Products" -maxdepth 2 -type d -name 'fheroes2.app' | head -n 1)"
+        if [[ -z "$APP" ]]; then
+          echo "::error::fheroes2.app was not found in the build output."
+          find "$RUNNER_TEMP/derived/Build/Products" -maxdepth 2
+          exit 1
+        fi
+        echo "Packaging $APP"
+        mkdir -p "$RUNNER_TEMP/ipa/Payload"
+        cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
+        (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/fheroes2.ipa" Payload)
+        ls -lh "$GITHUB_WORKSPACE/fheroes2.ipa"
+
+    - name: Upload fheroes2.ipa
+      uses: actions/upload-artifact@v7
+      with:
+        name: fheroes2-ios
+        path: fheroes2.ipa
+        if-no-files-found: error
